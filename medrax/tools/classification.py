@@ -1,10 +1,11 @@
-from typing import Dict, Optional, Tuple, Type
+from typing import ClassVar, Dict, Optional, Tuple, Type
 from pydantic import BaseModel, Field
 
 import skimage.io
 import torch
 import torchvision
 import torchxrayvision as xrv
+import numpy as np
 
 from langchain_core.callbacks import (
     AsyncCallbackManagerForToolRun,
@@ -35,6 +36,28 @@ class ChestXRayClassifierTool(BaseTool):
     A higher value indicates a higher likelihood of the condition being present.
     """
 
+    # Chinese translation mapping for pathology names
+    PATHOLOGY_CN_MAP: ClassVar[Dict[str, str]] = {
+        "Atelectasis": "肺不张",
+        "Cardiomegaly": "心脏扩大",
+        "Consolidation": "实变",
+        "Edema": "水肿",
+        "Effusion": "积液",
+        "Emphysema": "肺气肿",
+        "Enlarged Cardiomediastinum": "纵隔扩大",
+        "Fibrosis": "纤维化",
+        "Fracture": "骨折",
+        "Hernia": "疝",
+        "Infiltration": "浸润",
+        "Lung Lesion": "肺部病变",
+        "Lung Opacity": "肺部阴影",
+        "Mass": "肿块",
+        "Nodule": "结节",
+        "Pleural Thickening": "胸膜增厚",
+        "Pneumonia": "肺炎",
+        "Pneumothorax": "气胸",
+    }
+
     name: str = "chest_xray_classifier"
     description: str = (
         "A tool that analyzes chest X-ray images and classifies them for 18 different pathologies. "
@@ -56,7 +79,11 @@ class ChestXRayClassifierTool(BaseTool):
         self.model.eval()
         self.device = torch.device(device) if device else "cuda"
         self.model = self.model.to(self.device)
-        self.transform = torchvision.transforms.Compose([xrv.datasets.XRayCenterCrop()])
+        # Add resize to 224x224 to match model input size and avoid warnings
+        self.transform = torchvision.transforms.Compose([
+            xrv.datasets.XRayCenterCrop(),
+            xrv.datasets.XRayResizer(224)
+        ])
 
     def _process_image(self, image_path: str) -> torch.Tensor:
         """
@@ -114,11 +141,18 @@ class ChestXRayClassifierTool(BaseTool):
             with torch.inference_mode():
                 preds = self.model(img).cpu()[0]
 
-            output = dict(zip(xrv.datasets.default_pathologies, preds.numpy()))
+            # Convert numpy array to Python native types for JSON serialization
+            preds_np = preds.numpy()
+            # Create output with both English and Chinese names
+            output = {}
+            for pathology, prob in zip(xrv.datasets.default_pathologies, preds_np):
+                cn_name = self.PATHOLOGY_CN_MAP.get(pathology, pathology)
+                output[f"{pathology} ({cn_name})"] = float(prob)
+            
             metadata = {
                 "image_path": image_path,
                 "analysis_status": "completed",
-                "note": "Probabilities range from 0 to 1, with higher values indicating higher likelihood of the condition.",
+                "note": "概率值范围0-1，数值越高表示该病理存在的可能性越大。",
             }
             return output, metadata
         except Exception as e:

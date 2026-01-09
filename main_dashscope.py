@@ -3,7 +3,6 @@ import warnings
 from typing import *
 from dotenv import load_dotenv
 from transformers import logging
-
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_openai import ChatOpenAI
 
@@ -14,7 +13,7 @@ from medrax.utils import *
 
 warnings.filterwarnings("ignore")
 logging.set_verbosity_error()
-_ = load_dotenv()
+load_dotenv()
 
 def initialize_agent(
     prompt_file,
@@ -22,10 +21,10 @@ def initialize_agent(
     model_dir="/model-weights",
     temp_dir="temp",
     device="cpu",
-    model="Qwen3-VL-30B-A3B-Instruct",
+    model="qwen3-vl-235b-a22b-instruct", # 确保具备视觉识别、Function Calling能力
     temperature=0.7,
     top_p=0.95,
-    openai_kwargs={}
+    openai_kwargs=None
 ):
     """Initialize the MedRAX agent with specified tools and configuration.
 
@@ -47,8 +46,8 @@ def initialize_agent(
     prompt = prompts["MEDICAL_ASSISTANT"]
 
     all_tools = {
-        "ChestXRayClassifierTool": lambda: ChestXRayClassifierTool(device=device),
-        "ChestXRaySegmentationTool": lambda: ChestXRaySegmentationTool(device=device),
+        # "ChestXRayClassifierTool": lambda: ChestXRayClassifierTool(device=device),
+        # "ChestXRaySegmentationTool": lambda: ChestXRaySegmentationTool(device=device),
         # "LlavaMedTool": lambda: LlavaMedTool(cache_dir=model_dir, device=device, load_in_8bit=True),
         # "XRayVQATool": lambda: XRayVQATool(cache_dir=model_dir, device=device),
         "ChestXRayReportGeneratorTool": lambda: ChestXRayReportGeneratorTool(
@@ -93,6 +92,7 @@ if __name__ == "__main__":
     """
     print("Starting server...")
 
+
     # Example: initialize with only specific tools
     # Here three tools are commented out, you can uncomment them to use them
     selected_tools = [
@@ -108,12 +108,10 @@ if __name__ == "__main__":
     ]
 
     # Collect the ENV variables
-    openai_kwargs = {}
-    if api_key := os.getenv("OPENAI_API_KEY"):
-        openai_kwargs["api_key"] = api_key
-
-    if base_url := os.getenv("OPENAI_BASE_URL"):
-        openai_kwargs["base_url"] = base_url
+    openai_kwargs = {
+    "api_key": "sk-b3386bd1af3945f38bb7bddc2bcdcaed",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    }
 
     agent, tools_dict = initialize_agent(
         "medrax/docs/system_prompts.txt",
@@ -121,11 +119,11 @@ if __name__ == "__main__":
         model_dir="/model-weights",  # Change this to the path of the model weights
         temp_dir="temp",  # Change this to the path of the temporary directory
         device="cpu",  # Change this to the device you want to use
-        model="Qwen3-VL-30B-A3B-Instruct",  # Change this to the model you want to use, e.g. gpt-4o-mini
+        model="qwen3-vl-235b-a22b-instruct",  # Change this to the model you want to use, e.g. gpt-4o-mini
         temperature=0.7,
         top_p=0.95,
         openai_kwargs=openai_kwargs
     )
     demo = create_demo(agent, tools_dict)
 
-    demo.launch(server_name="127.0.0.1", server_port=8585, share=False)
+    demo.launch(server_name="127.0.0.1", server_port=7860, share=False) #改用gradio默认端口

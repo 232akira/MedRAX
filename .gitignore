@@ -172,3 +172,9 @@ logs/
 temp/
 
 .gradio/
+
+# Model weights and cache files
+model-weights/
+*.safetensors
+*.incomplete
+*.lock

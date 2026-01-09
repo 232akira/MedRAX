@@ -106,27 +106,30 @@ class ChatInterface:
             self.current_thread_id = str(time.time())
 
         messages = []
+        # Use original path for tools, but display path (converted PNG) for multimodal encoding
         image_path = self.original_file_path or display_image
+        display_path_for_encoding = self.display_file_path or display_image
 
         if image_path is not None:
-            # Send path for tools
+            # Send path for tools (use original path so tools can process DICOM if needed)
             messages.append({"role": "user", "content": f"image_path: {image_path}"})
 
-            # Load and encode image for multimodal
-            with open(image_path, "rb") as img_file:
-                img_base64 = base64.b64encode(img_file.read()).decode("utf-8")
+            # Load and encode image for multimodal (use display path to avoid DICOM size issues)
+            if display_path_for_encoding and Path(display_path_for_encoding).exists():
+                with open(display_path_for_encoding, "rb") as img_file:
+                    img_base64 = base64.b64encode(img_file.read()).decode("utf-8")
 
-            messages.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"},
-                        }
-                    ],
-                }
-            )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"},
+                            }
+                        ],
+                    }
+                )
 
         if message is not None:
             messages.append({"role": "user", "content": [{"type": "text", "text": message}]})
