@@ -21,7 +21,7 @@ def initialize_agent(
     tools_to_use=None,
     model_dir="/model-weights",
     temp_dir="temp",
-    device="cpu",
+    device="cuda",
     model="Qwen3-VL-30B-A3B-Instruct",
     temperature=0.7,
     top_p=0.95,
@@ -120,7 +120,7 @@ if __name__ == "__main__":
         tools_to_use=selected_tools,
         model_dir="/model-weights",  # Change this to the path of the model weights
         temp_dir="temp",  # Change this to the path of the temporary directory
-        device="cpu",  # Change this to the device you want to use
+        device="cuda",  # Change this to the device you want to use
         model="Qwen3-VL-30B-A3B-Instruct",  # Change this to the model you want to use, e.g. gpt-4o-mini
         temperature=0.7,
         top_p=0.95,
