@@ -33,6 +33,26 @@ class ChatInterface:
         self.original_file_path = None  # For LLM (.dcm or other)
         self.display_file_path = None  # For UI (always viewable format)
 
+    def _normalize_path(self, path: Optional[str]) -> Optional[str]:
+        """Return an absolute, normalized path for UI usage."""
+        if not path:
+            return None
+        return str(Path(path).resolve())
+
+    def _normalize_history(self, history: Optional[List]) -> List[ChatMessage]:
+        """Normalize chat history to ChatMessage objects."""
+        if not history:
+            return []
+        normalized = []
+        for item in history:
+            if isinstance(item, ChatMessage):
+                normalized.append(item)
+            elif isinstance(item, dict):
+                normalized.append(
+                    ChatMessage(role=item.get("role"), content=item.get("content"))
+                )
+        return normalized
+
     def handle_upload(self, file_path: str) -> str:
         """
         Handle new file upload and set appropriate paths.
@@ -58,15 +78,15 @@ class ChatInterface:
         # Handle DICOM conversion for display only
         if suffix == ".dcm":
             output, _ = self.tools_dict["DicomProcessorTool"]._run(str(saved_path))
-            self.display_file_path = output["image_path"]
+            self.display_file_path = self._normalize_path(output["image_path"])
         else:
-            self.display_file_path = str(saved_path)
+            self.display_file_path = self._normalize_path(str(saved_path))
 
         return self.display_file_path
 
     def add_message(
         self, message: str, display_image: str, history: List[dict]
-    ) -> Tuple[List[dict], gr.Textbox]:
+    ) -> Tuple[List[ChatMessage], gr.Textbox]:
         """
         Add a new message to the chat history.
 
@@ -76,14 +96,15 @@ class ChatInterface:
             history (List[dict]): Current chat history
 
         Returns:
-            Tuple[List[dict], gr.Textbox]: Updated history and textbox component
+            Tuple[List[ChatMessage], gr.Textbox]: Updated history and textbox update
         """
-        image_path = self.original_file_path or display_image
+        history = self._normalize_history(history)
+        image_path = self._normalize_path(self.original_file_path or display_image)
         if image_path is not None:
-            history.append({"role": "user", "content": {"path": image_path}})
+            history.append(ChatMessage(role="user", content={"path": image_path}))
         if message is not None:
-            history.append({"role": "user", "content": message})
-        return history, gr.Textbox(value=message, interactive=False)
+            history.append(ChatMessage(role="user", content=message))
+        return history, gr.update(value=message, interactive=False)
 
     async def process_message(
         self, message: str, display_image: Optional[str], chat_history: List[ChatMessage]
@@ -99,7 +120,7 @@ class ChatInterface:
         Yields:
             Tuple[List[ChatMessage], Optional[str], str]: Updated chat history, display path, and empty string
         """
-        chat_history = chat_history or []
+        chat_history = self._normalize_history(chat_history)
 
         # Initialize thread if needed
         if not self.current_thread_id:
@@ -107,8 +128,10 @@ class ChatInterface:
 
         messages = []
         # Use original path for tools, but display path (converted PNG) for multimodal encoding
-        image_path = self.original_file_path or display_image
-        display_path_for_encoding = self.display_file_path or display_image
+        image_path = self._normalize_path(self.original_file_path or display_image)
+        display_path_for_encoding = self._normalize_path(
+            self.display_file_path or display_image
+        )
 
         if image_path is not None:
             # Send path for tools (use original path so tools can process DICOM if needed)
@@ -167,14 +190,20 @@ class ChatInterface:
 
                             # For image_visualizer, use display path
                             if tool_name == "image_visualizer":
-                                self.display_file_path = tool_result["image_path"]
-                                chat_history.append(
-                                    ChatMessage(
-                                        role="assistant",
-                                        # content=gr.Image(value=self.display_file_path),
-                                        content={"path": self.display_file_path},
+                                if isinstance(tool_result, dict) and tool_result.get(
+                                    "image_path"
+                                ):
+                                    self.display_file_path = self._normalize_path(
+                                        tool_result["image_path"]
                                     )
-                                )
+                                    if self.display_file_path:
+                                        chat_history.append(
+                                            ChatMessage(
+                                                role="assistant",
+                                                # content=gr.Image(value=self.display_file_path),
+                                                content={"path": self.display_file_path},
+                                            )
+                                        )
 
                             yield chat_history, self.display_file_path, ""
 
@@ -184,7 +213,7 @@ class ChatInterface:
                     role="assistant", content=f"❌ Error: {str(e)}", metadata={"title": "Error"}
                 )
             )
-            yield chat_history, self.display_file_path
+            yield chat_history, self.display_file_path, ""
 
 
 def create_demo(agent, tools_dict):

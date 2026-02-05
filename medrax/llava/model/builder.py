@@ -44,14 +44,26 @@ def load_pretrained_model(
         # Load LLaVA model
         if "mistral" in model_name.lower():
             tokenizer = AutoTokenizer.from_pretrained(model_path, cache_dir=cache_dir)
-            model = LlavaMistralForCausalLM.from_pretrained(
-                model_path,
+            model_kwargs = dict(
                 low_cpu_mem_usage=low_cpu_mem_usage,
-                use_flash_attention_2=False,
                 cache_dir=cache_dir,
                 torch_dtype=torch_dtype,
                 **kwargs,
             )
+            try:
+                model = LlavaMistralForCausalLM.from_pretrained(
+                    model_path,
+                    use_flash_attention_2=False,
+                    **model_kwargs,
+                )
+            except TypeError as e:
+                # Older LlavaMistralForCausalLM doesn't accept use_flash_attention_2
+                if "use_flash_attention_2" not in str(e):
+                    raise
+                model = LlavaMistralForCausalLM.from_pretrained(
+                    model_path,
+                    **model_kwargs,
+                )
 
     else:
         # Load language model

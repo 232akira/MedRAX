@@ -7,7 +7,10 @@ from pydantic import BaseModel, Field
 from diffusers import StableDiffusionPipeline
 from langchain_core.callbacks import AsyncCallbackManagerForToolRun, CallbackManagerForToolRun
 from langchain_core.tools import BaseTool
+import os
 
+# Avoid importing flash-attn on platforms where it is incompatible.
+os.environ.setdefault("DIFFUSERS_FORCE_DISABLE_FLASH_ATTENTION", "1")
 
 class ChestXRayGeneratorInput(BaseModel):
     """Input schema for the Chest X-Ray Generator Tool."""

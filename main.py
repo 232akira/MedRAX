@@ -1,5 +1,6 @@
 import os
 import warnings
+from pathlib import Path
 from typing import *
 from dotenv import load_dotenv
 from transformers import logging
@@ -49,8 +50,8 @@ def initialize_agent(
     all_tools = {
         "ChestXRayClassifierTool": lambda: ChestXRayClassifierTool(device=device),
         "ChestXRaySegmentationTool": lambda: ChestXRaySegmentationTool(device=device),
-        # "LlavaMedTool": lambda: LlavaMedTool(cache_dir=model_dir, device=device, load_in_8bit=True),
-        # "XRayVQATool": lambda: XRayVQATool(cache_dir=model_dir, device=device),
+        "LlavaMedTool": lambda: LlavaMedTool(cache_dir=model_dir, device=device, load_in_8bit=False),
+        "XRayVQATool": lambda: XRayVQATool(cache_dir=model_dir, device=device),
         "ChestXRayReportGeneratorTool": lambda: ChestXRayReportGeneratorTool(
             cache_dir=model_dir, device=device
         ),
@@ -102,7 +103,7 @@ if __name__ == "__main__":
         "ChestXRaySegmentationTool",
         "ChestXRayReportGeneratorTool",
         "XRayVQATool",
-        # "LlavaMedTool",
+        "LlavaMedTool",
         # "XRayPhraseGroundingTool",
         # "ChestXRayGeneratorTool",
     ]
@@ -115,8 +116,9 @@ if __name__ == "__main__":
     if base_url := os.getenv("OPENAI_BASE_URL"):
         openai_kwargs["base_url"] = base_url
 
+    prompt_path = (Path(__file__).resolve().parent / "medrax" / "docs" / "system_prompts.txt")
     agent, tools_dict = initialize_agent(
-        "medrax/docs/system_prompts.txt",
+        str(prompt_path),
         tools_to_use=selected_tools,
         model_dir="/model-weights",  # Change this to the path of the model weights
         temp_dir="temp",  # Change this to the path of the temporary directory
