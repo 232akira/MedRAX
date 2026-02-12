@@ -53,6 +53,55 @@ class XRayPhraseGroundingTool(BaseTool):
     device: str = "cuda"
     temp_dir: Path = None
 
+    @staticmethod
+    def _patch_maira_model_compat(model: Any) -> Any:
+        """
+        Patch MAIRA-2 model object for mixed remote-code expectations.
+
+        Some remote implementations expect `model.model` to exist, while newer
+        wrappers may expose only `language_model`. We add a safe alias at
+        runtime without modifying installed packages.
+        """
+        try:
+            # Some MAIRA remote-code paths expect image_hidden_states on LM outputs.
+            try:
+                from transformers.modeling_outputs import BaseModelOutputWithPast
+
+                if not hasattr(BaseModelOutputWithPast, "image_hidden_states"):
+                    BaseModelOutputWithPast.image_hidden_states = property(
+                        lambda out: getattr(out, "hidden_states", None)
+                    )
+            except Exception:
+                pass
+
+            if not hasattr(model, "model"):
+                if hasattr(model, "language_model"):
+                    # Prefer LM backbone (hidden states) instead of full LM head
+                    # to avoid applying lm_head on logits again.
+                    language_model = model.language_model
+                    if hasattr(language_model, "model"):
+                        model.model = language_model.model
+                    elif hasattr(language_model, "base_model"):
+                        model.model = language_model.base_model
+                    else:
+                        model.model = language_model
+                else:
+                    model.model = model
+
+            # Some remote generation paths expect `model.lm_head` directly.
+            if not hasattr(model, "lm_head"):
+                if hasattr(model, "language_model") and hasattr(model.language_model, "lm_head"):
+                    model.lm_head = model.language_model.lm_head
+                elif hasattr(model, "get_output_embeddings"):
+                    try:
+                        model.lm_head = model.get_output_embeddings()
+                    except Exception:
+                        pass
+        except Exception:
+            # Best-effort compatibility patch; continue with original model.
+            pass
+        return model
+
     def __init__(
         self,
         model_path: str = "microsoft/maira-2",
@@ -89,6 +138,7 @@ class XRayPhraseGroundingTool(BaseTool):
             trust_remote_code=True,
             quantization_config=quantization_config,
         )
+        self.model = self._patch_maira_model_compat(self.model)
         self.processor = AutoProcessor.from_pretrained(
             model_path, cache_dir=cache_dir, trust_remote_code=True
         )
@@ -192,7 +242,17 @@ class XRayPhraseGroundingTool(BaseTool):
 
             # Process multiple predictions
             processed_predictions = []
-            for pred_phrase, pred_bboxes in predictions:
+            for pred in predictions:
+                # Be tolerant to remote-code output shape differences.
+                if isinstance(pred, (list, tuple)) and len(pred) >= 2:
+                    pred_phrase, pred_bboxes = pred[0], pred[1]
+                elif isinstance(pred, dict):
+                    pred_phrase = pred.get("phrase", phrase)
+                    pred_bboxes = pred.get("boxes") or pred.get("bboxes") or pred.get("bbox") or []
+                else:
+                    # Skip unknown formats instead of crashing the whole tool.
+                    continue
+
                 if not pred_bboxes:  # Skip if no bounding boxes
                     continue
 

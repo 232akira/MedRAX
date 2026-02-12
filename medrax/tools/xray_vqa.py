@@ -12,6 +12,71 @@ from langchain_core.callbacks import (
 from langchain_core.tools import BaseTool
 
 
+def _patch_dynamic_cache_compat() -> None:
+    """
+    Patch transformers DynamicCache for mixed-version compatibility.
+
+    Some model remote code expects `DynamicCache.seen_tokens`, while newer
+    transformers variants may expose only `_seen_tokens` or rely on
+    `get_seq_length()`. We add a compatible property at runtime to avoid
+    touching installed core packages.
+    """
+    try:
+        from transformers.cache_utils import DynamicCache  # type: ignore
+    except Exception:
+        return
+
+    def _get_seen_tokens(cache_obj):
+        if hasattr(cache_obj, "_seen_tokens"):
+            return cache_obj._seen_tokens
+        if hasattr(cache_obj, "get_seq_length"):
+            try:
+                return int(cache_obj.get_seq_length())
+            except Exception:
+                pass
+        return 0
+
+    def _set_seen_tokens(cache_obj, value):
+        cache_obj._seen_tokens = value
+
+    if not hasattr(DynamicCache, "seen_tokens"):
+        DynamicCache.seen_tokens = property(_get_seen_tokens, _set_seen_tokens)
+
+    # Older remote code may call cache.get_max_length()
+    if not hasattr(DynamicCache, "get_max_length"):
+        def _get_max_length(cache_obj, *args, **kwargs):
+            # Returning None means "no explicit cap" in HF generation internals.
+            if hasattr(cache_obj, "max_cache_len"):
+                return getattr(cache_obj, "max_cache_len")
+            return None
+        DynamicCache.get_max_length = _get_max_length
+
+    # Some generation paths call get_usable_length(new_seq_len)
+    if not hasattr(DynamicCache, "get_usable_length"):
+        def _get_usable_length(cache_obj, *args, **kwargs):
+            # Old signature compatibility: get_usable_length(new_seq_length, layer_idx=0)
+            new_seq_length = kwargs.get("new_seq_length", None)
+            layer_idx = kwargs.get("layer_idx", 0)
+            if len(args) >= 1 and new_seq_length is None:
+                new_seq_length = args[0]
+            if len(args) >= 2:
+                layer_idx = args[1]
+            if new_seq_length is None:
+                new_seq_length = 0
+            try:
+                if hasattr(cache_obj, "get_seq_length"):
+                    current = int(cache_obj.get_seq_length(layer_idx))
+                else:
+                    current = 0
+            except Exception:
+                current = 0
+            max_len = cache_obj.get_max_length() if hasattr(cache_obj, "get_max_length") else None
+            if max_len is None:
+                return current
+            return max(0, min(current, int(max_len) - int(new_seq_length)))
+        DynamicCache.get_usable_length = _get_usable_length
+
+
 class XRayVQAToolInput(BaseModel):
     """Input schema for the CheXagent Tool."""
 
@@ -67,6 +132,7 @@ class XRayVQATool(BaseTool):
 
         original_transformers_version = transformers.__version__
         transformers.__version__ = "4.40.0"
+        _patch_dynamic_cache_compat()
 
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.dtype = dtype
@@ -83,8 +149,15 @@ class XRayVQATool(BaseTool):
             device_map=self.device,
             trust_remote_code=True,
             cache_dir=cache_dir,
+            attn_implementation="eager",
         )
         self.model = self.model.to(dtype=self.dtype)
+        # Force a conservative attention backend for compatibility on mixed stacks.
+        if hasattr(self.model, "config"):
+            try:
+                self.model.config._attn_implementation = "eager"
+            except Exception:
+                pass
         self.model.eval()
 
         transformers.__version__ = original_transformers_version
@@ -110,20 +183,49 @@ class XRayVQATool(BaseTool):
             conv, add_generation_prompt=True, return_tensors="pt"
         ).to(device=self.device)
 
-        # Run inference
-        with torch.inference_mode():
-            output = self.model.generate(
-                input_ids,
-                do_sample=False,
-                num_beams=1,
-                temperature=1.0,
-                top_p=1.0,
-                use_cache=True,
-                max_new_tokens=max_new_tokens,
-            )[0]
-            response = self.tokenizer.decode(output[input_ids.size(1) : -1])
+        def _decode_sequences(generated: Any) -> Optional[str]:
+            if generated is None:
+                return None
+            sequences = generated.sequences if hasattr(generated, "sequences") else generated
+            if torch.is_tensor(sequences):
+                seq = sequences[0] if sequences.dim() > 1 else sequences
+            elif isinstance(sequences, (list, tuple)) and len(sequences) > 0:
+                first = sequences[0]
+                if torch.is_tensor(first):
+                    seq = first
+                else:
+                    return None
+            else:
+                return None
 
-            return response
+            decoded = self.tokenizer.decode(seq[input_ids.size(1):], skip_special_tokens=True).strip()
+            return decoded if decoded else None
+
+        errors: List[str] = []
+        # Prefer cache path first (CheXagent remote code commonly assumes cached generation),
+        # then fallback to non-cache mode for compatibility.
+        for use_cache in (True, False):
+            try:
+                with torch.inference_mode():
+                    generated = self.model.generate(
+                        input_ids,
+                        do_sample=False,
+                        num_beams=1,
+                        temperature=1.0,
+                        top_p=1.0,
+                        use_cache=use_cache,
+                        max_new_tokens=max_new_tokens,
+                        return_dict_in_generate=True,
+                        output_scores=False,
+                    )
+                decoded = _decode_sequences(generated)
+                if decoded is not None:
+                    return decoded
+                errors.append(f"use_cache={use_cache}: empty output")
+            except Exception as e:
+                errors.append(f"use_cache={use_cache}: {e}")
+
+        raise RuntimeError("CheXagent generation failed; " + " | ".join(errors))
 
     def _run(
         self,

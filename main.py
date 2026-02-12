@@ -48,21 +48,21 @@ def initialize_agent(
     prompt = prompts["MEDICAL_ASSISTANT"]
 
     all_tools = {
-        "ChestXRayClassifierTool": lambda: ChestXRayClassifierTool(device=device),
-        "ChestXRaySegmentationTool": lambda: ChestXRaySegmentationTool(device=device),
-        "LlavaMedTool": lambda: LlavaMedTool(cache_dir=model_dir, device=device, load_in_8bit=False),
-        "XRayVQATool": lambda: XRayVQATool(cache_dir=model_dir, device=device),
-        "ChestXRayReportGeneratorTool": lambda: ChestXRayReportGeneratorTool(
+        "ImageVisualizerTool": lambda: ImageVisualizerTool(),                                         # 1.图像可视化
+        "DicomProcessorTool": lambda: DicomProcessorTool(temp_dir=temp_dir),                          # 2.DICOM文件处理
+        "ChestXRayClassifierTool": lambda: ChestXRayClassifierTool(device=device),                    # 3.病理分类
+        "ChestXRaySegmentationTool": lambda: ChestXRaySegmentationTool(device=device),                # 4.结构分割
+        "ChestXRayReportGeneratorTool": lambda: ChestXRayReportGeneratorTool(                         # 5.报告生成
             cache_dir=model_dir, device=device
         ),
-        "XRayPhraseGroundingTool": lambda: XRayPhraseGroundingTool(
-            cache_dir=model_dir, temp_dir=temp_dir, load_in_8bit=True, device=device
+        "XRayVQATool": lambda: XRayVQATool(cache_dir=model_dir, device=device),                       # 6.分析问答
+        "LlavaMedTool": lambda: LlavaMedTool(cache_dir=model_dir, device=device, load_in_8bit=False), # 7.医学视觉问答
+        "XRayPhraseGroundingTool": lambda: XRayPhraseGroundingTool(                                   # 8.医学短语定位
+            cache_dir=model_dir, temp_dir=temp_dir, load_in_8bit=False, device=device
         ),
-        "ChestXRayGeneratorTool": lambda: ChestXRayGeneratorTool(
-            model_path=f"{model_dir}/roentgen", temp_dir=temp_dir, device=device
-        ),
-        "ImageVisualizerTool": lambda: ImageVisualizerTool(),
-        "DicomProcessorTool": lambda: DicomProcessorTool(temp_dir=temp_dir),
+        # "ChestXRayGeneratorTool": lambda: ChestXRayGeneratorTool(                                     # 9.胸片图像生成
+        #     model_path=f"{model_dir}/roentgen", temp_dir=temp_dir, device=device
+        # ),
     }
 
     # Initialize only selected tools or all if none specified
@@ -97,15 +97,15 @@ if __name__ == "__main__":
     # Example: initialize with only specific tools
     # Here three tools are commented out, you can uncomment them to use them
     selected_tools = [
-        "ImageVisualizerTool",
-        "DicomProcessorTool",
-        "ChestXRayClassifierTool",
-        "ChestXRaySegmentationTool",
-        "ChestXRayReportGeneratorTool",
-        "XRayVQATool",
-        "LlavaMedTool",
-        # "XRayPhraseGroundingTool",
-        # "ChestXRayGeneratorTool",
+        "ImageVisualizerTool",          # 1.图像可视化
+        "DicomProcessorTool",           # 2.DICOM文件处理
+        "ChestXRayClassifierTool",      # 3.病理分类
+        "ChestXRaySegmentationTool",    # 4.结构分割
+        "ChestXRayReportGeneratorTool", # 5.报告生成
+        "XRayVQATool",                  # 6.分析问答
+        "LlavaMedTool",                 # 7.医学视觉问答
+        "XRayPhraseGroundingTool",      # 8.医学短语定位
+        # "ChestXRayGeneratorTool",       # 9.胸片图像生成
     ]
 
     # Collect the ENV variables
@@ -130,4 +130,4 @@ if __name__ == "__main__":
     )
     demo = create_demo(agent, tools_dict)
 
-    demo.launch(server_name="127.0.0.1", server_port=8585, share=False)
+    demo.launch(server_name="0.0.0.0", server_port=8585, share=False)
